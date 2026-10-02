@@ -15,7 +15,13 @@ let socket: Socket | null = null;
 export function initSocket(accessToken: string): Socket {
   if (socket?.connected) return socket;
 
-  socket = io(typeof window !== "undefined" ? window.location.origin.replace("5173", "4000") : "http://localhost:4000", {
+  // In production VITE_API_URL = https://xxx.onrender.com/api/v1 — strip /api/v1 for socket
+  const apiUrl = import.meta.env["VITE_API_URL"] as string | undefined;
+  const serverUrl = apiUrl
+    ? apiUrl.replace(/\/api\/v1\/?$/, "")
+    : "http://localhost:4000";
+
+  socket = io(serverUrl, {
     auth: { token: accessToken },
     transports: ["websocket"],
   });

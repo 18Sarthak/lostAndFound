@@ -3,7 +3,10 @@
  * and typed error responses matching the backend error format.
  */
 
-export const API_BASE = "/api/v1";
+// In dev: Vite proxies /api/v1 → localhost:4000 (see vite.config.ts)
+// In production: set VITE_API_URL=https://your-backend.onrender.com/api/v1 on Vercel
+export const API_BASE = import.meta.env["VITE_API_URL"] ?? "/api/v1";
+
 
 export class ApiError extends Error {
   constructor(

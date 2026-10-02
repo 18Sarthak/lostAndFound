@@ -20,7 +20,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package*.json ./
-RUN npm ci --only=production --ignore-scripts
+# Install production deps + keep prisma CLI for migrations
+RUN npm ci --only=production --ignore-scripts && \
+    npm install --save-dev prisma --ignore-scripts
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
@@ -30,4 +32,6 @@ RUN npx prisma generate
 
 EXPOSE 4000
 
-CMD ["node", "dist/server.js"]
+# Run migrations then start the server.
+# On Render the DATABASE_URL env var is injected at runtime.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]

@@ -8,11 +8,16 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 const BACKEND = process.env["BACKEND_URL"] ?? "http://localhost:4000";
 
+// When building for Vercel, NITRO_PRESET=vercel is set via vercel.json env block.
+// For local dev and Docker-based previews the default (cloudflare-pages) is used.
+const nitrPreset = process.env["NITRO_PRESET"] as string | undefined;
+
 export default defineConfig({
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    ...(nitrPreset ? { nitro: { preset: nitrPreset } } : {}),
   },
   vite: {
     server: {

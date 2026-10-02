@@ -1,0 +1,98 @@
+##############################################################################
+# Render Blueprint — Lost & Found (monorepo root)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Usage:
+#   1. Push this repo to GitHub / GitLab.
+#   2. In Render Dashboard → New → Blueprint → connect the repo root.
+#   3. Fill in the "sync: false" env vars directly in the Render dashboard
+#      (they are kept out of version control for security).
+##############################################################################
+
+services:
+  # ── Web service (Express + Prisma + Socket.IO) ──────────────────────────────
+  - type: web
+    name: lostfound-api
+    runtime: docker
+    dockerfilePath: ./ms2/Dockerfile   # relative to repo root
+    dockerContext: ./ms2               # relative to repo root
+    region: oregon           # Change: oregon | frankfurt | singapore | ohio
+    plan: free               # Use "starter" or higher for production
+    healthCheckPath: /health
+    branch: master           # Deploy on every push to master
+
+    envVars:
+      # ── Server ──────────────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+
+      # ── Database ──────────────────────────────────────────────────────────────
+      # Render auto-populates DATABASE_URL when you link the database below.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lostfound-db
+          property: connectionString
+
+      # ── CORS ─────────────────────────────────────────────────────────────────
+      # Fill these in the Render dashboard AFTER your Vercel URL is known.
+      # Example: https://your-app.vercel.app
+      - key: CLIENT_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ── JWT ──────────────────────────────────────────────────────────────────
+      # Render auto-generates cryptographically random values for these.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ACCESS_TOKEN_TTL
+        value: 15m
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: "14"
+
+      # ── Auth rules ────────────────────────────────────────────────────────────
+      # Comma-separated allowed email domains, or leave empty for all
+      - key: ALLOWED_EMAIL_DOMAINS
+        value: ""
+
+      # ── Item lifecycle ────────────────────────────────────────────────────────
+      - key: REQUIRE_MODERATION
+        value: "false"
+      - key: ITEM_EXPIRY_DAYS
+        value: "60"
+
+      # ── Email — Resend ────────────────────────────────────────────────────────
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        value: "Lost & Found <noreply@yourdomain.com>"
+
+      # ── Cloudinary (image uploads) ────────────────────────────────────────────
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # ── Matching engine ───────────────────────────────────────────────────────
+      - key: MATCH_RADIUS_KM
+        value: "2"
+      - key: MATCH_DAYS_WINDOW
+        value: "14"
+      - key: MATCH_MIN_SCORE
+        value: "0.45"
+
+# ── Managed PostgreSQL (Postgres 16 with pgvector) ─────────────────────────────
+# NOTE: Free tier DBs are deleted after 90 days. Upgrade for persistent storage.
+databases:
+  - name: lostfound-db
+    databaseName: lostfound
+    user: lostfound_user
+    region: oregon
+    plan: free
+    postgresMajorVersion: 16

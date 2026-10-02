@@ -69,7 +69,7 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
-        value: "Lost & Found <noreply@yourdomain.com>"
+        value: "Lost & Found <onboarding@resend.dev>"
 
       # ── Cloudinary (image uploads) ────────────────────────────────────────────
       - key: CLOUDINARY_CLOUD_NAME

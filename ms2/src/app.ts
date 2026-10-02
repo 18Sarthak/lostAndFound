@@ -33,6 +33,12 @@ import { authenticate } from './middleware/auth.js';
 export function createApp() {
   const app = express();
 
+  // ── Trust proxy (Render, Railway, etc.) ───────────────────────────────────
+  // Required so req.ip resolves to the real client IP behind a load balancer.
+  // Without this, all requests appear to come from the proxy's IP and all
+  // users share the same rate-limit bucket, causing immediate 429s.
+  app.set('trust proxy', 1);
+
   // ── Security headers ──────────────────────────────────────────────────────
   app.use(
     helmet({

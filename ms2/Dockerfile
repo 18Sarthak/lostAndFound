@@ -11,6 +11,9 @@ COPY tsconfig.build.json ./
 COPY src ./src
 COPY prisma ./prisma
 
+# Generate Prisma client BEFORE tsc so all @prisma/client types are available
+RUN npx prisma generate
+
 RUN npm run build
 
 # ─── Stage 2: Production image ────────────────────────────────────────────────

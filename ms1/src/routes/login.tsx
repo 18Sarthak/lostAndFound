@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Mail, KeyRound, ArrowLeft } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, setAccessToken } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { initSocket } from "@/lib/socket";
 
@@ -46,6 +46,9 @@ function LoginPage() {
     try {
       const res = await api.auth.verifyOtp(email, code.trim(), name.trim() || undefined);
       const token = res.data.accessToken;
+
+      // Store token BEFORE calling me() so the Bearer header is set
+      setAccessToken(token);
 
       // Fetch user profile
       const me = await api.auth.me();

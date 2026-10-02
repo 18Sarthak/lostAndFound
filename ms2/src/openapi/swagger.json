@@ -1,0 +1,469 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Lost & Found API",
+    "description": "Backend API for the Lost & Found platform — college campus pilot with extensibility for apartments, offices, and transit operators.",
+    "version": "1.0.0",
+    "contact": { "name": "Lost & Found Team" }
+  },
+  "servers": [
+    { "url": "http://localhost:4000/api/v1", "description": "Local development" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "example": "VALIDATION_ERROR" },
+              "message": { "type": "string" },
+              "details": { "type": "array", "items": {} }
+            }
+          }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "total": { "type": "integer" },
+          "totalPages": { "type": "integer" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "emailVerified": { "type": "boolean" },
+          "avatarUrl": { "type": "string", "nullable": true },
+          "role": { "type": "string", "enum": ["USER", "MODERATOR", "ADMIN"] },
+          "karmaPoints": { "type": "integer" },
+          "isBanned": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "type": { "type": "string", "enum": ["LOST", "FOUND"] },
+          "status": { "type": "string", "enum": ["PENDING_REVIEW", "ACTIVE", "CLAIMED", "RETURNED", "EXPIRED", "REMOVED"] },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "categoryId": { "type": "integer" },
+          "locationName": { "type": "string", "nullable": true },
+          "latitude": { "type": "number", "nullable": true },
+          "longitude": { "type": "number", "nullable": true },
+          "eventDate": { "type": "string", "format": "date-time" },
+          "verificationQuestion": { "type": "string", "nullable": true, "description": "Only shown to authenticated non-owners" },
+          "expiresAt": { "type": "string", "format": "date-time", "nullable": true },
+          "returnedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "user": { "$ref": "#/components/schemas/PublicUser" },
+          "images": { "type": "array", "items": { "$ref": "#/components/schemas/ItemImage" } },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PublicUser": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "avatarUrl": { "type": "string", "nullable": true },
+          "karmaPoints": { "type": "integer" }
+        }
+      },
+      "ItemImage": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" },
+          "position": { "type": "integer" }
+        }
+      },
+      "Claim": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "itemId": { "type": "string" },
+          "claimantId": { "type": "string" },
+          "note": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "CANCELLED"] },
+          "answerMatches": { "type": "boolean", "nullable": true },
+          "decidedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "claimId": { "type": "string" },
+          "senderId": { "type": "string" },
+          "body": { "type": "string" },
+          "readAt": { "type": "string", "format": "date-time", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": "string", "nullable": true },
+          "link": { "type": "string", "nullable": true },
+          "isRead": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": { "description": "Server is healthy", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" } } } } } }
+        }
+      }
+    },
+    "/auth/request-otp": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Request email OTP",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string", "format": "email", "example": "student@college.edu.in" } } } } }
+        },
+        "responses": {
+          "200": { "description": "OTP sent (same response regardless of whether email exists)" },
+          "403": { "description": "Email domain not allowed" },
+          "429": { "description": "Rate limit exceeded" }
+        }
+      }
+    },
+    "/auth/verify-otp": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify OTP and get tokens",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["email", "code"], "properties": { "email": { "type": "string" }, "code": { "type": "string", "example": "123456" }, "name": { "type": "string", "description": "Required for first-time signup", "example": "Alice Smith" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Tokens issued", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "object", "properties": { "accessToken": { "type": "string" } } } } } } } },
+          "201": { "description": "New user created and tokens issued" },
+          "400": { "description": "Invalid OTP or missing name for first-time signup" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Rotate refresh token",
+        "security": [],
+        "responses": {
+          "200": { "description": "New tokens issued" },
+          "401": { "description": "Invalid or expired refresh token" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Revoke refresh token and clear cookie",
+        "responses": { "200": { "description": "Logged out" } }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current user",
+        "responses": {
+          "200": { "description": "Current user", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/User" } } } } } }
+        }
+      }
+    },
+    "/items": {
+      "get": {
+        "tags": ["Items"],
+        "summary": "List active items with filters",
+        "security": [],
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["LOST", "FOUND"] } },
+          { "name": "categoryId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "Full-text search" },
+          { "name": "dateFrom", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "dateTo", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "lat", "in": "query", "schema": { "type": "number" } },
+          { "name": "lng", "in": "query", "schema": { "type": "number" } },
+          { "name": "radiusKm", "in": "query", "schema": { "type": "number" } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["newest", "nearest"] } },
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Paginated list", "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } }, "meta": { "$ref": "#/components/schemas/PaginationMeta" } } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Items"],
+        "summary": "Create a LOST or FOUND item",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["type", "title", "description", "categoryId", "eventDate"], "properties": { "type": { "type": "string", "enum": ["LOST", "FOUND"] }, "title": { "type": "string" }, "description": { "type": "string" }, "categoryId": { "type": "integer" }, "eventDate": { "type": "string", "format": "date-time" }, "locationName": { "type": "string" }, "latitude": { "type": "number" }, "longitude": { "type": "number" }, "imageUrls": { "type": "array", "items": { "type": "string" }, "maxItems": 5 }, "verificationQuestion": { "type": "string", "description": "Required for FOUND items" }, "verificationAnswer": { "type": "string", "description": "Required for FOUND items — never returned in responses" }, "handoverPointId": { "type": "string", "format": "uuid" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Item created" },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "tags": ["Items"],
+        "summary": "Get item by ID",
+        "security": [],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Item detail" }, "404": { "description": "Not found" } }
+      },
+      "patch": {
+        "tags": ["Items"],
+        "summary": "Update item (owner or admin)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Updated item" }, "403": { "description": "Forbidden" } }
+      },
+      "delete": {
+        "tags": ["Items"],
+        "summary": "Soft delete item",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/items/{id}/mark-returned": {
+      "post": {
+        "tags": ["Items"],
+        "summary": "Mark item as returned (awards karma to claimant)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Item marked returned" } }
+      }
+    },
+    "/items/{id}/claims": {
+      "get": {
+        "tags": ["Claims"],
+        "summary": "List claims for an item (owner/admin)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Claims list" } }
+      },
+      "post": {
+        "tags": ["Claims"],
+        "summary": "Submit a claim for a FOUND item",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["answer"], "properties": { "answer": { "type": "string" }, "note": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Claim submitted" } }
+      }
+    },
+    "/items/{id}/matches": {
+      "get": {
+        "tags": ["Matches"],
+        "summary": "Get potential matches for an item (owner only)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Matches list" } }
+      }
+    },
+    "/items/{id}/report": {
+      "post": {
+        "tags": ["Reports"],
+        "summary": "Report an item",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["reason"], "properties": { "reason": { "type": "string", "enum": ["SPAM", "FAKE_CLAIM", "INAPPROPRIATE", "PRIVACY_VIOLATION", "OTHER"] }, "details": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Report submitted" } }
+      }
+    },
+    "/claims/{claimId}": {
+      "patch": {
+        "tags": ["Claims"],
+        "summary": "Approve or reject a claim (owner/admin)",
+        "parameters": [{ "name": "claimId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["APPROVED", "REJECTED"] } } } } } },
+        "responses": { "200": { "description": "Claim updated" } }
+      },
+      "delete": {
+        "tags": ["Claims"],
+        "summary": "Cancel a pending claim (claimant only)",
+        "parameters": [{ "name": "claimId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Claim cancelled" } }
+      }
+    },
+    "/claims/{claimId}/messages": {
+      "get": {
+        "tags": ["Messages"],
+        "summary": "Get messages in a claim chat",
+        "parameters": [{ "name": "claimId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Messages list" } }
+      },
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Send a message in a claim chat",
+        "parameters": [{ "name": "claimId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["body"], "properties": { "body": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Message sent" } }
+      }
+    },
+    "/claims/{claimId}/messages/read": {
+      "post": {
+        "tags": ["Messages"],
+        "summary": "Mark messages as read",
+        "parameters": [{ "name": "claimId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Messages marked read" } }
+      }
+    },
+    "/matches/{id}/dismiss": {
+      "post": {
+        "tags": ["Matches"],
+        "summary": "Dismiss a match",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Match dismissed" } }
+      }
+    },
+    "/uploads/sign": {
+      "post": {
+        "tags": ["Uploads"],
+        "summary": "Get Cloudinary signature for direct browser upload",
+        "responses": { "200": { "description": "Signature params" } }
+      }
+    },
+    "/categories": {
+      "get": {
+        "tags": ["Categories"],
+        "summary": "List all categories",
+        "security": [],
+        "responses": { "200": { "description": "Categories list" } }
+      }
+    },
+    "/handover-points": {
+      "get": {
+        "tags": ["Handover Points"],
+        "summary": "List active handover points",
+        "security": [],
+        "responses": { "200": { "description": "Handover points" } }
+      }
+    },
+    "/users/me/items": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Get authenticated user's items",
+        "responses": { "200": { "description": "User's items" } }
+      }
+    },
+    "/users/me/claims": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Get authenticated user's claims",
+        "responses": { "200": { "description": "User's claims" } }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "Get current user's notifications",
+        "responses": { "200": { "description": "Notifications list" } }
+      }
+    },
+    "/notifications/unread-count": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "Get unread notification count",
+        "responses": { "200": { "description": "Unread count" } }
+      }
+    },
+    "/notifications/{id}/read": {
+      "patch": {
+        "tags": ["Notifications"],
+        "summary": "Mark a notification as read",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Notification marked read" } }
+      }
+    },
+    "/notifications/read-all": {
+      "post": {
+        "tags": ["Notifications"],
+        "summary": "Mark all notifications as read",
+        "responses": { "200": { "description": "All read" } }
+      }
+    },
+    "/admin/reports": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "List reports (staff only)",
+        "responses": { "200": { "description": "Reports" } }
+      }
+    },
+    "/admin/reports/{id}/resolve": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Resolve a report",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Report resolved" } }
+      }
+    },
+    "/admin/items": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "List items by status (staff only)",
+        "parameters": [{ "name": "status", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Items" } }
+      }
+    },
+    "/admin/items/{id}/moderate": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Approve or reject an item",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["action"], "properties": { "action": { "type": "string", "enum": ["approve", "reject"] }, "reason": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Moderated" } }
+      }
+    },
+    "/admin/users/{id}/ban": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Ban a user (admin only)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "User banned" } }
+      }
+    },
+    "/admin/users/{id}/unban": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Unban a user (admin only)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "User unbanned" } }
+      }
+    },
+    "/admin/stats": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Platform statistics",
+        "responses": { "200": { "description": "Stats" } }
+      }
+    }
+  }
+}

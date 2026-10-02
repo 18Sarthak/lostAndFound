@@ -1,0 +1,292 @@
+// Lost & Found Platform - Prisma schema (PostgreSQL)
+// Setup: npm i prisma @prisma/client && npx prisma migrate dev --name init
+// For AI matching, run once in Postgres: CREATE EXTENSION IF NOT EXISTS vector;
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm]
+}
+
+// ---------- ENUMS ----------
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum ItemType {
+  LOST
+  FOUND
+}
+
+// Lifecycle: REPORTED -> (MATCHED) -> CLAIMED -> RETURNED, or EXPIRED/REMOVED
+enum ItemStatus {
+  PENDING_REVIEW
+  ACTIVE
+  CLAIMED
+  RETURNED
+  EXPIRED
+  REMOVED
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationType {
+  MATCH_FOUND
+  CLAIM_RECEIVED
+  CLAIM_APPROVED
+  CLAIM_REJECTED
+  NEW_MESSAGE
+  ITEM_RETURNED
+  ITEM_EXPIRING
+  SYSTEM
+}
+
+enum ReportReason {
+  SPAM
+  FAKE_CLAIM
+  INAPPROPRIATE
+  PRIVACY_VIOLATION
+  OTHER
+}
+
+// ---------- USERS ----------
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  phone         String? // optional, never shown publicly
+  avatarUrl     String?
+  role          Role      @default(USER)
+  karmaPoints   Int       @default(0) // reward for returning items
+  isBanned      Boolean   @default(false)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items         Item[]
+  claims        Claim[]
+  messages      Message[]
+  notifications Notification[]
+  reports       Report[]       @relation("ReportedBy")
+  verifiedItems Item[]         @relation("ReturnVerifiedBy")
+  refreshTokens RefreshToken[]
+}
+
+// ---------- AUTH ----------
+
+model OtpCode {
+  id          String    @id @default(uuid())
+  email       String
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int       @default(0)
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  replacedById  String?   // ID of the token that replaced this one (rotation chain)
+  userAgent     String?
+  ip            String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+// ---------- LOOKUP TABLES ----------
+
+model Category {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique // Phone, Wallet, ID Card, Keys, Bag, Bottle, Books...
+  slug  String  @unique
+  icon  String?
+  items Item[]
+}
+
+// Physical handover points: security desk, library counter, etc.
+model HandoverPoint {
+  id           String  @id @default(uuid())
+  name         String // "Security Desk, Block B"
+  description  String?
+  latitude     Float?
+  longitude    Float?
+  openingHours String?
+  isActive     Boolean @default(true)
+  items        Item[]
+}
+
+// ---------- CORE: ITEMS ----------
+
+model Item {
+  id     String     @id @default(uuid())
+  type   ItemType
+  status ItemStatus @default(PENDING_REVIEW)
+
+  title       String
+  description String
+  categoryId  Int
+  category    Category @relation(fields: [categoryId], references: [id])
+
+  // Where / when it was lost or found
+  locationName String? // "Library 2nd floor"
+  latitude     Float?
+  longitude    Float?
+  eventDate    DateTime // date item was lost/found
+
+  // Claim verification: finder hides one detail only the owner knows.
+  // Only relevant for FOUND items.
+  verificationQuestion String?
+  verificationAnswer   String? // store lowercase/trimmed; never return to clients
+
+  // Where a FOUND item is physically kept
+  handoverPointId String?
+  handoverPoint   HandoverPoint? @relation(fields: [handoverPointId], references: [id])
+
+  // AI matching (CLIP embedding). Needs pgvector.
+  embedding Unsupported("vector(512)")?
+
+  // Lifecycle
+  expiresAt          DateTime? // auto-archive after 60-90 days
+  returnedAt         DateTime?
+  returnVerifiedById String?
+  returnVerifiedBy   User?     @relation("ReturnVerifiedBy", fields: [returnVerifiedById], references: [id])
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images       ItemImage[]
+  claims       Claim[]
+  reports      Report[]
+  // Matches where this item is the lost side or the found side
+  lostMatches  Match[]     @relation("LostItem")
+  foundMatches Match[]     @relation("FoundItem")
+
+  @@index([type, status])
+  @@index([categoryId])
+  @@index([eventDate])
+  @@index([latitude, longitude])
+  @@index([userId])
+}
+
+model ItemImage {
+  id        String   @id @default(uuid())
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  url       String
+  publicId  String? // Cloudinary/S3 key, used for deletion
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([itemId])
+}
+
+// ---------- AI / AUTO MATCHING ----------
+
+model Match {
+  id          String   @id @default(uuid())
+  lostItemId  String
+  foundItemId String
+  lostItem    Item     @relation("LostItem", fields: [lostItemId], references: [id], onDelete: Cascade)
+  foundItem   Item     @relation("FoundItem", fields: [foundItemId], references: [id], onDelete: Cascade)
+  score       Float // 0..1 similarity (text + image + distance + date)
+  notified    Boolean  @default(false)
+  dismissed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([lostItemId, foundItemId])
+  @@index([score])
+}
+
+// ---------- CLAIMS & CHAT ----------
+
+model Claim {
+  id         String @id @default(uuid())
+  itemId     String
+  item       Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  claimantId String
+  claimant   User   @relation(fields: [claimantId], references: [id])
+
+  answer        String? // answer to the verification question — never returned to clients
+  note          String? // extra proof the claimant wants to add
+  answerMatches Boolean? // internal signal for owner; true if answer matched
+  status        ClaimStatus @default(PENDING)
+  decidedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  messages Message[]
+
+  // One active claim per user per item
+  @@unique([itemId, claimantId])
+  @@index([status])
+}
+
+// Anonymous in-app chat, scoped to a claim so phone numbers are never exposed
+model Message {
+  id        String    @id @default(uuid())
+  claimId   String
+  claim     Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User      @relation(fields: [senderId], references: [id])
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([claimId, createdAt])
+}
+
+// ---------- NOTIFICATIONS & MODERATION ----------
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String?
+  link      String? // frontend route, e.g. /items/abc123
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+}
+
+model Report {
+  id         String       @id @default(uuid())
+  itemId     String
+  item       Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  reporterId String
+  reporter   User         @relation("ReportedBy", fields: [reporterId], references: [id])
+  reason     ReportReason
+  details    String?
+  resolved   Boolean      @default(false)
+  createdAt  DateTime     @default(now())
+
+  @@index([resolved])
+}
